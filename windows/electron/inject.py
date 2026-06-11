@@ -28,6 +28,42 @@ def _read_pid_file(name):
     return 0
 
 
+def _alive(pid):
+    """True if a process with this id currently exists."""
+    if not pid:
+        return False
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if h:
+        k32.CloseHandle(h)
+        return True
+    return False
+
+
+def _hwnd_owner_pid(hwnd):
+    """The process that owns a window (for a terminal window, the console host)."""
+    pid = ctypes.wintypes.DWORD(0)
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def console_candidate_pids():
+    """Ordered, de-duplicated list of live PIDs whose console we might inject into.
+    1. The Claude Code PID saved by the SessionStart hook (preferred - works for
+       both classic conhost and ConPTY terminals).
+    2. The process owning the saved terminal window (covers a stale PID file)."""
+    out = []
+    p = _read_pid_file('claude-console-pid.txt')
+    if _alive(p):
+        out.append(p)
+    hwnd = _read_pid_file('claude-terminal-hwnd.txt')
+    if hwnd:
+        owner = _hwnd_owner_pid(hwnd)
+        if _alive(owner) and owner not in out:
+            out.append(owner)
+    return out
+
+
 # ── WriteConsoleInput ──────────────────────────────────────────────────────────
 
 KEY_EVENT = 0x0001
@@ -199,9 +235,9 @@ def sendinput_inject(text):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 # Try WriteConsoleInput first using the saved Claude Code PID
-console_pid = _read_pid_file('claude-console-pid.txt')
-if console_pid and write_console_input(console_pid, text):
-    sys.exit(0)
+for pid in console_candidate_pids():
+    if write_console_input(pid, text):
+        sys.exit(0)
 
 # Fallback: SendInput with window focus
 sendinput_inject(text)
