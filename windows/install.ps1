@@ -125,7 +125,9 @@ if 'hooks' not in settings:
     settings['hooks'] = {}
 
 def cmd(script):
-    return 'powershell -NoProfile -NonInteractive -File "' + hooks_dir + '\\' + script + '"'
+    # Forward slashes avoid backslash escape issues in Claude Code hook commands
+    fwd = hooks_dir.replace('\\', '/')
+    return 'powershell -NoProfile -NonInteractive -File ' + fwd + '/' + script
 
 settings['hooks']['SessionStart'] = [{'hooks': [{'type': 'command', 'command': cmd('widget-start.ps1')}]}]
 settings['hooks']['PreToolUse']  = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-thinking.ps1')}]}]
