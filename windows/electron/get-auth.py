@@ -10,6 +10,8 @@ import sys, json, os, shutil, tempfile, sqlite3, re, base64, ctypes, ctypes.wint
 
 _LOCAL = os.environ.get('LOCALAPPDATA', '')
 
+_APPDATA = os.environ.get('APPDATA', '')
+
 BROWSERS = [
     {
         'name': 'Chrome',
@@ -25,6 +27,14 @@ BROWSERS = [
         'cookie_paths': [
             os.path.join(_LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'Network', 'Cookies'),
             os.path.join(_LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cookies'),
+        ],
+    },
+    {
+        'name': 'Brave',
+        'local_state': os.path.join(_LOCAL, 'BraveSoftware', 'Brave-Browser', 'User Data', 'Local State'),
+        'cookie_paths': [
+            os.path.join(_LOCAL, 'BraveSoftware', 'Brave-Browser', 'User Data', 'Default', 'Network', 'Cookies'),
+            os.path.join(_LOCAL, 'BraveSoftware', 'Brave-Browser', 'User Data', 'Default', 'Cookies'),
         ],
     },
 ]
@@ -88,21 +98,45 @@ def decrypt_value(enc_value: bytes, aes_key: bytes) -> str:
         return ''
 
 
+def _copy_locked(src: str, dst: str) -> bool:
+    """Copy a file that may be exclusively locked by another process (e.g. Chrome).
+    Uses CreateFile with FILE_SHARE_READ|WRITE|DELETE so we can open it regardless."""
+    GENERIC_READ              = 0x80000000
+    FILE_SHARE_READ           = 0x00000001
+    FILE_SHARE_WRITE          = 0x00000002
+    FILE_SHARE_DELETE         = 0x00000004
+    OPEN_EXISTING             = 3
+    INVALID_HANDLE_VALUE      = ctypes.wintypes.HANDLE(-1).value
+    h = ctypes.windll.kernel32.CreateFileW(
+        src, GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        None, OPEN_EXISTING, 0, None,
+    )
+    if h == INVALID_HANDLE_VALUE:
+        return False
+    try:
+        buf  = ctypes.create_string_buffer(65536)
+        read = ctypes.c_ulong(0)
+        with open(dst, 'wb') as out:
+            while True:
+                ok = ctypes.windll.kernel32.ReadFile(h, buf, 65536, ctypes.byref(read), None)
+                if not ok or read.value == 0:
+                    break
+                out.write(buf.raw[:read.value])
+        return True
+    finally:
+        ctypes.windll.kernel32.CloseHandle(h)
+
+
 def read_rows(db_path: str) -> list:
     q = ("SELECT name, encrypted_value, value FROM cookies"
          " WHERE host_key LIKE '%claude.ai%'"
          " AND name IN ('sessionKey','lastActiveOrg')")
-    try:
-        uri  = 'file:' + db_path + '?immutable=1&mode=ro'
-        conn = sqlite3.connect(uri, uri=True, timeout=2)
-        rows = conn.execute(q).fetchall()
-        conn.close()
-        return rows
-    except Exception:
-        pass
     tmp = tempfile.mktemp(suffix='.sqlite')
     try:
-        shutil.copy2(db_path, tmp)
+        copied = _copy_locked(db_path, tmp)
+        if not copied:
+            shutil.copy2(db_path, tmp)
         conn = sqlite3.connect(tmp, timeout=2)
         rows = conn.execute(q).fetchall()
         conn.close()
@@ -140,6 +174,28 @@ def try_browser(browser: dict):
     return {'sk': sk, 'org': org} if (sk and org) else None
 
 
+CACHE_FILE = os.path.join(os.environ.get('TEMP', ''), 'claude-auth-cache.json')
+
+
+def load_cache() -> dict | None:
+    try:
+        with open(CACHE_FILE, 'r') as f:
+            d = json.load(f)
+        if d.get('sk') and d.get('org'):
+            return d
+    except Exception:
+        pass
+    return None
+
+
+def save_cache(result: dict) -> None:
+    try:
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(result, f)
+    except Exception:
+        pass
+
+
 def main():
     result = {'sk': '', 'org': ''}
     try:
@@ -147,9 +203,15 @@ def main():
             r = try_browser(browser)
             if r:
                 result = r
+                save_cache(result)
                 break
     except Exception:
         pass
+    # Fall back to cached credentials when browser file is locked
+    if not result['sk']:
+        cached = load_cache()
+        if cached:
+            result = cached
     print(json.dumps(result))
 
 
