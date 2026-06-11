@@ -199,13 +199,37 @@ canvas.stars {
   padding: 2px 0 4px;
 }
 .input-prompt {
-  font-size: 10px;
-  color: var(--orange-lite);
-  opacity: .85;
-  line-height: 1.3;
-  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.35;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.notif-msg {
+  font-family: 'DM Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  background: rgba(255,255,255,.04);
+  border-left: 2px solid var(--orange);
+  border-radius: 0 6px 6px 0;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+}
+.notif-sub {
+  font-size: 9px;
+  color: var(--orange);
+  opacity: .6;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding-left: 2px;
 }
 .input-row {
   display: flex;

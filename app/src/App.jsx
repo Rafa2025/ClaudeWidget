@@ -26,8 +26,10 @@ export default function App() {
   const stageRef  = useRef(null)
   const partRef   = useRef(null)
   const timers    = useRef([])
-  const modeRef   = useRef(mode);  modeRef.current  = mode
-  const eggRef    = useRef(null);  eggRef.current   = egg
+  const modeRef    = useRef(mode);  modeRef.current  = mode
+  const eggRef     = useRef(null);  eggRef.current   = egg
+  const pendingRef  = useRef(null)   // queued state arriving during 'done'
+  const leftDoneRef = useRef(0)      // timestamp when we last left 'done'
 
   useEffect(() => {
     try { localStorage.setItem('ccw_collapsed', collapsed ? '1' : '0') } catch {}
@@ -38,6 +40,15 @@ export default function App() {
     window.setStatus = (mode, msg = '', opts = []) => {
       setMode(prev => {
         if (mode === 'done' && (prev === 'input' || prev === 'ask')) return prev
+        if (prev === 'done' && (mode === 'input' || mode === 'ask')) {
+          pendingRef.current = { mode, msg, opts }
+          return prev
+        }
+        // ignore input/ask for 3s after leaving done — notification hooks fire late
+        if ((mode === 'input' || mode === 'ask') && prev === 'idle'
+            && Date.now() - leftDoneRef.current < 3000) {
+          return prev
+        }
         return mode
       })
       if (mode === 'input') { setNotifMsg(msg || ''); setAskOpts([]) }
@@ -121,7 +132,19 @@ export default function App() {
       pushT(() => { react('spin'); burst(50, 48, { dist: 80, count: 8 }) }, 1300)
       pushT(() => setBubble({ text: '', cls: '' }), 2900)
       pushT(() => setFlag(false), 3500)
-      pushT(() => { if (modeRef.current === 'done') setMode('idle') }, 4300)
+      pushT(() => {
+        if (modeRef.current !== 'done') return
+        leftDoneRef.current = Date.now()
+        const p = pendingRef.current
+        pendingRef.current = null
+        if (p) {
+          setMode(p.mode)
+          if (p.mode === 'input') { setNotifMsg(p.msg || ''); setAskOpts([]) }
+          else if (p.mode === 'ask') { setNotifMsg(p.msg || ''); setAskOpts(Array.isArray(p.opts) ? p.opts : []) }
+        } else {
+          setMode('idle')
+        }
+      }, 4300)
     }
     return clearTimers
   }, [mode, react, burst])
@@ -325,10 +348,16 @@ export default function App() {
             )
             : (
               <>
-                <div className="status-word">{WORDS[mode]}</div>
-                <div className="status-hint">
-                  {mode === 'input' && notifMsg ? notifMsg : HINTS[mode]}
-                </div>
+                {mode === 'input' && notifMsg
+                  ? <>
+                      <div className="notif-msg">{notifMsg}</div>
+                      <div className="notif-sub">click to reply</div>
+                    </>
+                  : <>
+                      <div className="status-word">{WORDS[mode]}</div>
+                      <div className="status-hint">{HINTS[mode]}</div>
+                    </>
+                }
                 <StatsBar />
               </>
             )
