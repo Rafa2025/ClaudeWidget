@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Claude Code Widget hook — fires on Stop, sets widget to "done"
+PORT=$(cat /tmp/claude-widget-port.txt 2>/dev/null)
+[ -z "$PORT" ] && exit 0
+curl -sf --max-time 2 -X POST "http://127.0.0.1:$PORT/api/state" \
+     -H 'Content-Type: application/json' \
+     -d '{"state":"done"}' >/dev/null 2>&1

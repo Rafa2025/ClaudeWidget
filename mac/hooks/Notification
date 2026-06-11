@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+# Claude Code Widget hook — fires on Notification, sets widget to "input" with message
+import sys, json, urllib.request, urllib.error
+
+PORT_FILE = '/tmp/claude-widget-port.txt'
+
+try:
+    with open(PORT_FILE) as f:
+        port = f.read().strip()
+except OSError:
+    sys.exit(0)
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = {}
+
+msg = data.get('message', '')
+payload = json.dumps({'state': 'input', 'msg': msg}).encode()
+
+req = urllib.request.Request(
+    f'http://127.0.0.1:{port}/api/state',
+    data=payload,
+    headers={'Content-Type': 'application/json'},
+    method='POST'
+)
+try:
+    urllib.request.urlopen(req, timeout=2)
+except Exception:
+    pass
