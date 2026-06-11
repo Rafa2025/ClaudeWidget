@@ -148,8 +148,18 @@ def read_rows(db_path: str) -> list:
         except: pass
 
 
+_ORG_RE = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+
+
+def _result_from_vals(vals: dict):
+    sk  = vals.get('sessionKey', '')
+    m   = _ORG_RE.search(vals.get('lastActiveOrg', ''))
+    org = m.group(0) if m else ''
+    return {'sk': sk, 'org': org} if (sk and org) else None
+
+
 def try_browser(browser: dict):
-    """Attempt auth extraction from one browser. Returns {'sk':..,'org':..} or None."""
+    """Attempt auth extraction from one Chromium browser. Returns dict or None."""
     aes_key = get_aes_key(browser['local_state'])
     if not aes_key:
         return None
@@ -165,13 +175,73 @@ def try_browser(browser: dict):
             v = decrypt_value(bytes(enc), aes_key)
             if v:
                 vals[name] = v
-    sk = vals.get('sessionKey', '')
-    m  = re.search(
-        r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
-        vals.get('lastActiveOrg', '')
-    )
-    org = m.group(0) if m else ''
-    return {'sk': sk, 'org': org} if (sk and org) else None
+    return _result_from_vals(vals)
+
+
+# ── Firefox ─────────────────────────────────────────────────────────────────────
+# Firefox stores cookies UNENCRYPTED in cookies.sqlite (moz_cookies.value is
+# plaintext) and never uses App-Bound Encryption, so this is the most reliable
+# source on Windows when Chrome/Edge/Brave cookies are v20.
+
+def firefox_cookie_dbs() -> list:
+    base = os.path.join(os.environ.get('APPDATA', ''), 'Mozilla', 'Firefox', 'Profiles')
+    dbs = []
+    try:
+        for prof in os.listdir(base):
+            p = os.path.join(base, prof, 'cookies.sqlite')
+            if os.path.exists(p):
+                dbs.append(p)
+    except Exception:
+        pass
+    return dbs
+
+
+def read_rows_firefox(db_path: str) -> list:
+    q = ("SELECT name, value FROM moz_cookies"
+         " WHERE host LIKE '%claude.ai%'"
+         " AND name IN ('sessionKey','lastActiveOrg')")
+    # Firefox uses WAL, which permits read-only access while it is running.
+    try:
+        uri  = 'file:' + db_path + '?mode=ro'
+        conn = sqlite3.connect(uri, uri=True, timeout=2)
+        rows = conn.execute(q).fetchall()
+        conn.close()
+        return rows
+    except Exception:
+        pass
+    tmp = tempfile.mktemp(suffix='.sqlite')
+    try:
+        if not _copy_locked(db_path, tmp):
+            shutil.copy2(db_path, tmp)
+        for suf in ('-wal', '-shm'):
+            try:
+                if os.path.exists(db_path + suf) and not _copy_locked(db_path + suf, tmp + suf):
+                    shutil.copy2(db_path + suf, tmp + suf)
+            except Exception:
+                pass
+        conn = sqlite3.connect(tmp, timeout=2)
+        rows = conn.execute(q).fetchall()
+        conn.close()
+        return rows
+    except Exception:
+        return []
+    finally:
+        for suf in ('', '-wal', '-shm'):
+            try: os.unlink(tmp + suf)
+            except Exception: pass
+
+
+def try_firefox():
+    """Attempt auth extraction from Firefox (plaintext cookies). Returns dict or None."""
+    for db in firefox_cookie_dbs():
+        vals = {}
+        for name, value in read_rows_firefox(db):
+            if value:
+                vals[name] = value
+        r = _result_from_vals(vals)
+        if r:
+            return r
+    return None
 
 
 # Persistent cache: ~/.claude survives reboots and %TEMP% cleanups, so a single
@@ -203,15 +273,21 @@ def save_cache(result: dict) -> None:
 def main():
     result = {'sk': '', 'org': ''}
     try:
+        # Chromium browsers first (Chrome/Edge/Brave), then Firefox (plaintext).
         for browser in BROWSERS:
             r = try_browser(browser)
             if r:
                 result = r
                 save_cache(result)
                 break
+        if not result['sk']:
+            r = try_firefox()
+            if r:
+                result = r
+                save_cache(result)
     except Exception:
         pass
-    # Fall back to cached credentials when browser file is locked
+    # Fall back to cached credentials when browser files are locked/undecryptable
     if not result['sk']:
         cached = load_cache()
         if cached:

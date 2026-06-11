@@ -155,26 +155,28 @@ npm start
 
 The small `S` and `W` bars show your session (5-hour) and weekly token usage.
 They are read automatically from your browser's `claude.ai` cookies. The widget
-tries **Chrome → Edge → Brave** in order, and caches the last working credentials
-to `%TEMP%\claude-auth-cache.json` so stats survive even when the cookie file is
-later locked.
+tries **Chrome → Edge → Brave → Firefox** in order, and caches the last working
+credentials to `~\.claude\widget-auth-cache.json` (persists across reboots) so a
+single successful read keeps stats working until the session key expires.
 
 > **App-Bound Encryption (important)**
-> Chrome **and** Edge 127+ encrypt cookies with App-Bound Encryption (cookie prefix
-> `v20`). The decryption key is tied to the browser binary through a Windows COM
-> service, so **no outside program can decrypt these cookies** — this is Google's
-> anti-cookie-theft design, and it is why the stats may show `0%` on an up-to-date
-> Chrome or Edge. (Linux is unaffected because it uses keyring-based AES-CBC.)
+> Chrome, Edge, and recent Brave (Chromium 127+) can encrypt cookies with
+> App-Bound Encryption (cookie prefix `v20`). The decryption key is tied to the
+> browser binary through a Windows COM service, so **no outside program can
+> decrypt these cookies** — this is Google's anti-cookie-theft design, and it is
+> why stats may show `0%`. (Linux is unaffected; it uses keyring-based AES-CBC.)
 >
 > **To get usage stats working on Windows, use one of:**
-> - **Brave** — App-Bound Encryption is disabled by default; log into claude.ai in Brave.
-> - **A browser session read while it is closed** — the widget auto-reads cookies at
->   Windows login (before you open the browser) and caches them. So if you let the
->   widget start at login and only open Chrome/Edge afterward, the cached `sessionKey`
->   keeps stats working.
+> - **Firefox (guaranteed)** — Firefox stores cookies *unencrypted*, so the widget
+>   can always read them. Log into claude.ai in Firefox and you are done.
+> - **Brave** — if your Brave build still writes `v10` cookies, log into claude.ai
+>   there. (Newer Brave may use `v20`; if stats stay `0%`, switch to Firefox.)
+> - **Read while closed** — the widget reads cookies at login before the browser
+>   locks the file, and on every poll, so any time a supported browser with a
+>   readable cookie is closed, the `sessionKey` is captured and cached.
 >
-> Either way, the widget never shows wrong data — it shows `0%` when it cannot read,
-> and the website (claude.ai/settings/limits) always has your exact limits.
+> The widget never shows wrong data — it shows `0%` when it cannot read, and
+> claude.ai/settings/limits always has your exact limits.
 
 ---
 
