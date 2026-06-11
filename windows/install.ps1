@@ -1,9 +1,6 @@
-# Claude Code Widget — Windows Installer
-# Run from an Administrator PowerShell or a regular PowerShell (no admin needed for user-local install).
-# Usage: .\install.ps1
-
+﻿# Claude Code Widget - Windows Installer
+# Usage: powershell -ExecutionPolicy Bypass -File .\install.ps1
 #Requires -Version 5.1
-Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $REPO_ROOT    = Split-Path -Parent $PSScriptRoot
@@ -13,74 +10,108 @@ $HOOKS_SRC    = Join-Path $PSScriptRoot "hooks"
 $CLAUDE_DIR   = Join-Path $env:USERPROFILE ".claude"
 $HOOKS_DST    = Join-Path $CLAUDE_DIR   "hooks"
 
-function Write-Step($msg) { Write-Host "`n>> $msg" -ForegroundColor Cyan }
-function Write-Ok($msg)   { Write-Host "   OK  $msg" -ForegroundColor Green }
-function Write-Err($msg)  { Write-Host "   ERR $msg" -ForegroundColor Red; exit 1 }
+function Write-Step { param($msg) Write-Host "`n>> $msg" -ForegroundColor Cyan }
+function Write-Ok   { param($msg) Write-Host "   OK  $msg" -ForegroundColor Green }
+function Write-Warn { param($msg) Write-Host "   WARN $msg" -ForegroundColor Yellow }
+function Write-Err  { param($msg) Write-Host "   ERR $msg" -ForegroundColor Red; [System.Environment]::Exit(1) }
 
-Write-Host "`n===  Claude Code Widget — Windows Installer  ===" -ForegroundColor Magenta
+function Refresh-Path {
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+                [System.Environment]::GetEnvironmentVariable("Path","User")
+}
 
-# ── 1. Check dependencies ──────────────────────────────────────────────────────
+function Find-Python {
+    foreach ($cmd in @('python', 'python3', 'py')) {
+        if (where.exe $cmd 2>$null) { return $cmd }
+    }
+    return $null
+}
+
+Write-Host "`n=== Claude Code Widget - Windows Installer ===" -ForegroundColor Magenta
+
+# ── 1. Check / auto-install dependencies ──────────────────────────────────────
 Write-Step "Checking dependencies"
 
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Err "Node.js not found. Install from https://nodejs.org and re-run."
+$hasWinget = [bool](where.exe winget 2>$null)
+
+if (-not (where.exe node 2>$null)) {
+    if ($hasWinget) {
+        Write-Host "   Node.js not found. Installing via winget..." -ForegroundColor Yellow
+        winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements
+        Refresh-Path
+        if (-not (where.exe node 2>$null)) { Write-Err "Node.js installed but not found in PATH. Please restart this terminal and re-run." }
+    } else {
+        Write-Err "Node.js not found. Install from https://nodejs.org and re-run."
+    }
 }
 Write-Ok "Node.js $(node --version)"
-
-if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-    Write-Err "npm not found. It should come with Node.js."
-}
 Write-Ok "npm $(npm --version)"
 
-$PY = $null
-foreach ($cmd in @('python', 'python3')) {
-    if (Get-Command $cmd -ErrorAction SilentlyContinue) { $PY = $cmd; break }
-}
+$PY = Find-Python
 if (-not $PY) {
-    Write-Err "Python not found. Install from https://www.python.org (check 'Add to PATH')."
+    if ($hasWinget) {
+        Write-Host "   Python not found. Installing via winget..." -ForegroundColor Yellow
+        winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
+        Refresh-Path
+        $PY = Find-Python
+        if (-not $PY) { Write-Err "Python installed but not found in PATH. Please restart this terminal and re-run." }
+    } else {
+        Write-Err "Python not found. Install from https://www.python.org and enable the Add to PATH option during setup."
+    }
 }
-Write-Ok "Python found as '$PY' ($(&$PY --version 2>&1))"
+$pyVer = & $PY --version 2>&1
+Write-Ok "Python: $pyVer"
 
 # ── 2. Python dependencies ─────────────────────────────────────────────────────
-Write-Step "Installing Python dependencies (cryptography)"
+Write-Step "Installing Python dependencies"
 & $PY -m pip install cryptography --quiet --disable-pip-version-check
-if ($LASTEXITCODE -ne 0) { Write-Err "pip install failed. Try: $PY -m pip install cryptography" }
+if ($LASTEXITCODE -ne 0) { Write-Err "pip install failed. Run manually: $PY -m pip install cryptography" }
 Write-Ok "cryptography installed"
 
 # ── 3. Build React frontend ────────────────────────────────────────────────────
-Write-Step "Building React frontend (app/)"
+Write-Step "Building React frontend"
 Push-Location $APP_DIR
 npm install --loglevel error
 if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Err "npm install failed in app/" }
 npm run build --loglevel error
 if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Err "npm run build failed in app/" }
 Pop-Location
-Write-Ok "Frontend built → app/dist/"
+Write-Ok "Frontend built"
 
-# ── 4. Install Electron dependencies ──────────────────────────────────────────
-Write-Step "Installing Electron dependencies"
+# ── 4. Install Electron ────────────────────────────────────────────────────────
+Write-Step "Installing Electron"
 Push-Location $ELECTRON_DIR
 npm install --loglevel error
 if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Err "npm install failed in windows/electron/" }
-Pop-Location
-Write-Ok "Electron dependencies installed"
 
-# ── 5. Set up Claude Code hooks ────────────────────────────────────────────────
+# npm postinstall sometimes silently skips the binary download - detect and fix
+$electronExe  = Join-Path $ELECTRON_DIR "node_modules\electron\dist\electron.exe"
+$electronPath = Join-Path $ELECTRON_DIR "node_modules\electron\path.txt"
+if (-not (Test-Path $electronExe)) {
+    Write-Host "   Electron binary missing. Downloading now..." -ForegroundColor Yellow
+    $electronVer = (Get-Content (Join-Path $ELECTRON_DIR "node_modules\electron\package.json") | ConvertFrom-Json).version
+    $zipPath = node -e "const {downloadArtifact}=require('@electron/get');downloadArtifact({version:'$electronVer',artifactName:'electron'}).then(p=>process.stdout.write(p)).catch(e=>{process.stderr.write(e.message);process.exit(1);})"
+    if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Err "Failed to download Electron binary. Check your internet connection and try again." }
+    Expand-Archive -Path $zipPath -DestinationPath (Join-Path $ELECTRON_DIR "node_modules\electron\dist") -Force
+    [System.IO.File]::WriteAllText($electronPath, "electron.exe", [System.Text.Encoding]::ASCII)
+    Write-Ok "Electron binary downloaded"
+}
+Pop-Location
+Write-Ok "Electron ready"
+
+# ── 5. Configure Claude Code hooks ────────────────────────────────────────────
 Write-Step "Configuring Claude Code hooks"
 if (-not (Test-Path $HOOKS_DST)) {
     New-Item -ItemType Directory -Force $HOOKS_DST | Out-Null
 }
-
-# Copy hook scripts
 Copy-Item "$HOOKS_SRC\*.ps1" $HOOKS_DST -Force
-Write-Ok "Hook scripts copied to $HOOKS_DST"
+Write-Ok "Hook scripts copied"
 
-# Update ~/.claude/settings.json using Python (avoids PS5.1 JSON limitations)
 $updateScript = @"
 import json, os, sys
 
 settings_file = os.path.join(os.path.expanduser('~'), '.claude', 'settings.json')
-hooks_dir     = sys.argv[1]
+hooks_dir = sys.argv[1]
 
 try:
     with open(settings_file, encoding='utf-8') as f:
@@ -92,7 +123,7 @@ if 'hooks' not in settings:
     settings['hooks'] = {}
 
 def cmd(script):
-    return f'powershell -NoProfile -NonInteractive -File "{hooks_dir}\\{script}"'
+    return 'powershell -NoProfile -NonInteractive -File "' + hooks_dir + '\\' + script + '"'
 
 settings['hooks']['PreToolUse']  = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-thinking.ps1')}]}]
 settings['hooks']['Stop']        = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-done.ps1')}]}]
@@ -106,34 +137,31 @@ print(settings_file)
 
 $written = & $PY -c $updateScript $HOOKS_DST
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "   WARN Could not auto-update settings.json. Add hooks manually (see INSTALL.md)." -ForegroundColor Yellow
+    Write-Warn "Could not auto-update settings.json. Add hooks manually (see INSTALL.md)."
 } else {
     Write-Ok "Hooks registered in $written"
 }
 
-# ── 6. Optional: add to Windows startup ───────────────────────────────────────
-Write-Step "Startup (optional)"
-$ans = Read-Host "   Add widget to Windows startup? [y/N]"
-if ($ans -match '^[Yy]') {
-    $startupDir = [System.Environment]::GetFolderPath('Startup')
-    $wsh        = New-Object -ComObject WScript.Shell
-    $lnk        = $wsh.CreateShortcut("$startupDir\ClaudeCodeWidget.lnk")
-    $lnk.TargetPath       = "cmd.exe"
-    $lnk.Arguments        = "/c `"npm start --prefix `"$ELECTRON_DIR`"`""
-    $lnk.WorkingDirectory = $ELECTRON_DIR
-    $lnk.WindowStyle      = 7   # minimized
-    $lnk.Save()
-    Write-Ok "Startup shortcut created in $startupDir"
-} else {
-    Write-Host "   Skipped. Start manually: npm start  (from windows\electron\)" -ForegroundColor Gray
-}
+# ── 6. Add to Windows startup ──────────────────────────────────────────────────
+Write-Step "Adding to Windows startup"
+$startupDir = [System.Environment]::GetFolderPath('Startup')
+$wsh = New-Object -ComObject WScript.Shell
+$lnk = $wsh.CreateShortcut("$startupDir\ClaudeCodeWidget.lnk")
+$lnk.TargetPath       = "cmd.exe"
+$lnk.Arguments        = "/c `"npm start --prefix `"$ELECTRON_DIR`"`""
+$lnk.WorkingDirectory = $ELECTRON_DIR
+$lnk.WindowStyle      = 7
+$lnk.Save()
+Write-Ok "Startup shortcut created"
+
+# ── 7. Launch widget ───────────────────────────────────────────────────────────
+Write-Step "Launching widget"
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c npm start --prefix `"$ELECTRON_DIR`""
+Write-Ok "Widget launched"
 
 # ── Done ───────────────────────────────────────────────────────────────────────
-Write-Host "`n===  Installation complete!  ===" -ForegroundColor Magenta
+Write-Host "`n=== Installation complete! ===" -ForegroundColor Magenta
 Write-Host ""
-Write-Host "  Start the widget:" -ForegroundColor White
-Write-Host "    cd `"$ELECTRON_DIR`"" -ForegroundColor Gray
-Write-Host "    npm start" -ForegroundColor Gray
-Write-Host ""
-Write-Host "  Then open Claude Code and the widget will update automatically." -ForegroundColor White
+Write-Host "  The widget is now running and will start automatically with Windows." -ForegroundColor White
+Write-Host "  To start it manually:  npm start  (from $ELECTRON_DIR)" -ForegroundColor Gray
 Write-Host ""
