@@ -127,6 +127,7 @@ if 'hooks' not in settings:
 def cmd(script):
     return 'powershell -NoProfile -NonInteractive -File "' + hooks_dir + '\\' + script + '"'
 
+settings['hooks']['SessionStart'] = [{'hooks': [{'type': 'command', 'command': cmd('widget-start.ps1')}]}]
 settings['hooks']['PreToolUse']  = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-thinking.ps1')}]}]
 settings['hooks']['Stop']        = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-done.ps1')}]}]
 settings['hooks']['Notification']= [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-notify.ps1')}]}]
