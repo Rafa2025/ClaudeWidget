@@ -21,7 +21,8 @@
     "productName": "Claude Code Widget",
     "extraResources": [
       { "from": "../../app/dist", "to": "dist", "filter": ["**/*"] },
-      { "from": "get-auth.py", "to": "get-auth.py" }
+      { "from": "get-auth.py", "to": "get-auth.py" },
+      { "from": "inject.py", "to": "inject.py" }
     ],
     "win": {
       "target": ["nsis"],

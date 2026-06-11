@@ -1,23 +1,34 @@
 #!/usr/bin/env python3
-"""Read Chrome claude.ai cookies on Windows using DPAPI + AES-GCM.
+"""Read claude.ai cookies on Windows using DPAPI + AES-GCM.
+Tries Chrome first, then Edge as fallback (Edge rarely uses App-Bound Encryption).
 Prints JSON: {"sk": "...", "org": "..."}. Exits with empty values on failure.
 
 Note: Chrome 127+ uses App-Bound Encryption (v20 prefix) which cannot be
-decrypted outside of Chrome. Older cookies (v10 prefix) are fully supported.
+decrypted outside of Chrome. Edge is tried as a fallback in that case.
 """
 import sys, json, os, shutil, tempfile, sqlite3, re, base64, ctypes, ctypes.wintypes
 
-COOKIE_PATHS = [
-    # Chrome 96+
-    os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Google', 'Chrome', 'User Data', 'Default', 'Network', 'Cookies'),
-    # Older Chrome
-    os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Google', 'Chrome', 'User Data', 'Default', 'Cookies'),
+_LOCAL = os.environ.get('LOCALAPPDATA', '')
+
+BROWSERS = [
+    {
+        'name': 'Chrome',
+        'local_state': os.path.join(_LOCAL, 'Google', 'Chrome', 'User Data', 'Local State'),
+        'cookie_paths': [
+            os.path.join(_LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'Network', 'Cookies'),
+            os.path.join(_LOCAL, 'Google', 'Chrome', 'User Data', 'Default', 'Cookies'),
+        ],
+    },
+    {
+        'name': 'Edge',
+        'local_state': os.path.join(_LOCAL, 'Microsoft', 'Edge', 'User Data', 'Local State'),
+        'cookie_paths': [
+            os.path.join(_LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'Network', 'Cookies'),
+            os.path.join(_LOCAL, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cookies'),
+        ],
+    },
 ]
 
-LOCAL_STATE = os.path.join(
-    os.environ.get('LOCALAPPDATA', ''),
-    'Google', 'Chrome', 'User Data', 'Local State'
-)
 
 class DATA_BLOB(ctypes.Structure):
     _fields_ = [('cbData', ctypes.wintypes.DWORD),
@@ -25,8 +36,8 @@ class DATA_BLOB(ctypes.Structure):
 
 
 def dpapi_decrypt(data: bytes) -> bytes | None:
-    buf     = ctypes.create_string_buffer(data)
-    blob_in = DATA_BLOB(len(data), buf)
+    buf      = ctypes.create_string_buffer(data)
+    blob_in  = DATA_BLOB(len(data), buf)
     blob_out = DATA_BLOB()
     ok = ctypes.windll.crypt32.CryptUnprotectData(
         ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)
@@ -38,23 +49,22 @@ def dpapi_decrypt(data: bytes) -> bytes | None:
     return result
 
 
-def get_aes_key() -> bytes | None:
-    """Extract the AES key from Chrome's Local State file via DPAPI."""
+def get_aes_key(local_state_path: str) -> bytes | None:
+    """Extract the AES-256 key from a browser Local State file via DPAPI."""
     try:
-        with open(LOCAL_STATE, 'r', encoding='utf-8') as f:
+        with open(local_state_path, 'r', encoding='utf-8') as f:
             state = json.load(f)
         enc_key_b64 = state.get('os_crypt', {}).get('encrypted_key', '')
         if not enc_key_b64:
             return None
         enc_key = base64.b64decode(enc_key_b64)
-        # First 5 bytes are the literal "DPAPI" prefix
-        return dpapi_decrypt(enc_key[5:])
+        return dpapi_decrypt(enc_key[5:])  # strip 5-byte "DPAPI" prefix
     except Exception:
         return None
 
 
 def decrypt_value(enc_value: bytes, aes_key: bytes) -> str:
-    """Decrypt a Chrome cookie value (v10 AES-GCM or legacy DPAPI)."""
+    """Decrypt a Chromium cookie value (v10 AES-GCM or legacy DPAPI)."""
     if not enc_value:
         return ''
     prefix = enc_value[:3]
@@ -78,18 +88,10 @@ def decrypt_value(enc_value: bytes, aes_key: bytes) -> str:
         return ''
 
 
-def find_cookie_db() -> str | None:
-    for p in COOKIE_PATHS:
-        if os.path.exists(p):
-            return p
-    return None
-
-
 def read_rows(db_path: str) -> list:
     q = ("SELECT name, encrypted_value, value FROM cookies"
          " WHERE host_key LIKE '%claude.ai%'"
          " AND name IN ('sessionKey','lastActiveOrg')")
-    # Try read-only URI first (file not locked)
     try:
         uri  = 'file:' + db_path + '?immutable=1&mode=ro'
         conn = sqlite3.connect(uri, uri=True, timeout=2)
@@ -98,7 +100,6 @@ def read_rows(db_path: str) -> list:
         return rows
     except Exception:
         pass
-    # Fall back to temp-file copy
     tmp = tempfile.mktemp(suffix='.sqlite')
     try:
         shutil.copy2(db_path, tmp)
@@ -113,34 +114,40 @@ def read_rows(db_path: str) -> list:
         except: pass
 
 
+def try_browser(browser: dict):
+    """Attempt auth extraction from one browser. Returns {'sk':..,'org':..} or None."""
+    aes_key = get_aes_key(browser['local_state'])
+    if not aes_key:
+        return None
+    db = next((p for p in browser['cookie_paths'] if os.path.exists(p)), None)
+    if not db:
+        return None
+    rows = read_rows(db)
+    vals = {}
+    for name, enc, plain in rows:
+        if plain:
+            vals[name] = plain
+        elif enc:
+            v = decrypt_value(bytes(enc), aes_key)
+            if v:
+                vals[name] = v
+    sk = vals.get('sessionKey', '')
+    m  = re.search(
+        r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+        vals.get('lastActiveOrg', '')
+    )
+    org = m.group(0) if m else ''
+    return {'sk': sk, 'org': org} if (sk and org) else None
+
+
 def main():
     result = {'sk': '', 'org': ''}
     try:
-        aes_key = get_aes_key()
-        if not aes_key:
-            print(json.dumps(result)); return
-
-        db = find_cookie_db()
-        if not db:
-            print(json.dumps(result)); return
-
-        rows = read_rows(db)
-        vals = {}
-        for name, enc, plain in rows:
-            if plain:
-                vals[name] = plain
-            elif enc:
-                vals[name] = decrypt_value(bytes(enc), aes_key)
-
-        sk  = vals.get('sessionKey', '')
-        m   = re.search(
-            r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
-            vals.get('lastActiveOrg', '')
-        )
-        org = m.group(0) if m else ''
-
-        if sk and org:
-            result = {'sk': sk, 'org': org}
+        for browser in BROWSERS:
+            r = try_browser(browser)
+            if r:
+                result = r
+                break
     except Exception:
         pass
     print(json.dumps(result))
