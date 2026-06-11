@@ -202,21 +202,23 @@ async function refreshUsage() {
 }
 
 function startUsagePolling() {
-  const delays = [3000, 8000, 20000, 40000]
-  let idx = 0
+  // First read fires almost immediately to win the login race: at startup the
+  // browser hasn't locked its cookie file yet, so this is our best chance to
+  // read + cache the sessionKey. If it fails (browser already running / locked),
+  // keep retrying every 20s so the moment the browser is ever closed we grab and
+  // cache it. Once we have a result, settle to a 90s refresh.
+  let settled = false
   const tryOnce = async () => {
     const { computeUsage } = require('./usage')
     const result = await computeUsage()
     if (result) {
       usageCache = result
-      setInterval(refreshUsage, 90_000)
-    } else if (idx < delays.length) {
-      setTimeout(tryOnce, delays[idx++])
-    } else {
-      setInterval(refreshUsage, 90_000)
+      if (!settled) { settled = true; setInterval(refreshUsage, 90_000) }
+    } else if (!settled) {
+      setTimeout(tryOnce, 20_000)
     }
   }
-  setTimeout(tryOnce, delays[idx++])
+  setTimeout(tryOnce, 800)
 }
 
 // ── System tray ───────────────────────────────────────────────────────────────

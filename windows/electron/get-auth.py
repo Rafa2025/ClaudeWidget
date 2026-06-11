@@ -174,7 +174,10 @@ def try_browser(browser: dict):
     return {'sk': sk, 'org': org} if (sk and org) else None
 
 
-CACHE_FILE = os.path.join(os.environ.get('TEMP', ''), 'claude-auth-cache.json')
+# Persistent cache: ~/.claude survives reboots and %TEMP% cleanups, so a single
+# successful read (e.g. at login before the browser locks the cookie file) keeps
+# usage stats working indefinitely, until the sessionKey itself expires.
+CACHE_FILE = os.path.join(os.path.expanduser('~'), '.claude', 'widget-auth-cache.json')
 
 
 def load_cache() -> dict | None:
@@ -190,6 +193,7 @@ def load_cache() -> dict | None:
 
 def save_cache(result: dict) -> None:
     try:
+        os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
         with open(CACHE_FILE, 'w') as f:
             json.dump(result, f)
     except Exception:
