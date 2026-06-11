@@ -230,6 +230,12 @@ function createTray() {
     { label: 'Quit',  click: () => app.quit() },
   ])
   tray.setContextMenu(menu)
+
+  // Left-click toggles visibility (parity with Linux)
+  tray.on('click', () => {
+    if (win.isVisible()) win.hide()
+    else { win.show(); win.focus(); applyState('idle') }
+  })
 }
 
 function tickTray() {
