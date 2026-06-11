@@ -2,26 +2,30 @@
 # Captures the terminal window handle and launches the widget if not running.
 "[$(Get-Date -Format 'HH:mm:ss')] SessionStart hook fired" | Out-File "$env:TEMP\widget-hook.log" -Append
 
-# ── Capture terminal HWND for inject.py ───────────────────────────────────────
+# ── Save Claude Code PID for inject.py (WriteConsoleInput) ────────────────────
+# The parent of this hook script is the node.exe running Claude Code.
+# inject.py uses AttachConsole(that_pid) to write directly to its console buffer.
+try {
+    $q = Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop
+    $claudePid = $q.ParentProcessId
+    [System.IO.File]::WriteAllText("$env:TEMP\claude-console-pid.txt", $claudePid.ToString())
+} catch {}
+
+# ── Capture terminal HWND (fallback for SendInput) ────────────────────────────
 try {
     Add-Type -TypeDefinition @"
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-public class WinUtil {
-    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+public class WinUtil2 {
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     public static IntPtr FindTerminalHwnd() {
-        // Walk parent process chain to find the hosting terminal
         int pid = Process.GetCurrentProcess().Id;
         for (int i = 0; i < 8; i++) {
             try {
                 var q = new System.Management.ManagementObjectSearcher(
                     "SELECT ParentProcessId FROM Win32_Process WHERE ProcessId=" + pid);
-                foreach (var o in q.Get()) {
-                    pid = Convert.ToInt32(o["ParentProcessId"]);
-                    break;
-                }
+                foreach (var o in q.Get()) { pid = Convert.ToInt32(o["ParentProcessId"]); break; }
                 var p = Process.GetProcessById(pid);
                 if (p.MainWindowHandle != IntPtr.Zero && IsWindowVisible(p.MainWindowHandle))
                     return p.MainWindowHandle;
@@ -31,7 +35,7 @@ public class WinUtil {
     }
 }
 "@ -ReferencedAssemblies System.Management
-    $hwnd = [WinUtil]::FindTerminalHwnd()
+    $hwnd = [WinUtil2]::FindTerminalHwnd()
     if ($hwnd -ne [IntPtr]::Zero) {
         [System.IO.File]::WriteAllText("$env:TEMP\claude-terminal-hwnd.txt", $hwnd.ToString())
     }
