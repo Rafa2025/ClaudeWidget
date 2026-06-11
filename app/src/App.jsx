@@ -44,11 +44,8 @@ export default function App() {
           pendingRef.current = { mode, msg, opts }
           return prev
         }
-        // ignore input/ask for 3s after leaving done — notification hooks fire late
-        if ((mode === 'input' || mode === 'ask') && prev === 'idle'
-            && Date.now() - leftDoneRef.current < 3000) {
-          return prev
-        }
+        // input/ask only valid from thinking — never from idle (spurious notifications)
+        if ((mode === 'input' || mode === 'ask') && prev === 'idle') return prev
         return mode
       })
       if (mode === 'input') { setNotifMsg(msg || ''); setAskOpts([]) }

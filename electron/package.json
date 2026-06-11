@@ -1,0 +1,39 @@
+{
+  "name": "claude-code-widget",
+  "version": "1.0.0",
+  "description": "Claude Code desktop widget",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:frontend": "cd ../app && npm install && npm run build",
+    "build": "npm run build:frontend && electron-builder",
+    "pack": "npm run build:frontend && electron-builder --dir"
+  },
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "ai.anthropic.claude-code-widget",
+    "productName": "Claude Code Widget",
+    "extraResources": [
+      { "from": "../app/dist", "to": "dist", "filter": ["**/*"] },
+      { "from": "get-auth.py", "to": "get-auth.py" }
+    ],
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Utility",
+      "maintainer": "Anthropic"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.utilities"
+    },
+    "win": {
+      "target": ["nsis"]
+    }
+  }
+}
