@@ -105,6 +105,8 @@ if (-not (Test-Path $HOOKS_DST)) {
     New-Item -ItemType Directory -Force $HOOKS_DST | Out-Null
 }
 Copy-Item "$HOOKS_SRC\*.ps1" $HOOKS_DST -Force
+# Write the electron path so the hook can auto-start the widget
+[System.IO.File]::WriteAllText((Join-Path $HOOKS_DST "electron-dir.txt"), $ELECTRON_DIR, [System.Text.Encoding]::UTF8)
 Write-Ok "Hook scripts copied"
 
 $updateScript = @"
