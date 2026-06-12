@@ -4,31 +4,36 @@ export default function StatsBar() {
   const [usage, setUsage] = useState(null)
 
   useEffect(() => {
+    // Single self-scheduling timer guarded by `mounted`: each run queues exactly
+    // the next one, so there's never more than one pending timeout and nothing
+    // can re-arm after unmount (a shared setInterval handle reassigned from an
+    // async callback would leak orphan intervals on unmount mid-fetch).
+    let mounted = true
     let id
-    const load = async () => {
+    const schedule = (ms) => { if (mounted) id = setTimeout(load, ms) }
+    async function load() {
+      let next = 30_000
       try {
         const res = await fetch('/api/usage')
         if (res.ok) {
           const data = await res.json()
+          if (!mounted) return
           setUsage(data)
-          // If server hasn't got data yet, ask it to refresh and retry sooner
-          if (!data.ok) {
-            fetch('/api/usage/refresh').catch(() => {})
-            clearInterval(id)
-            id = setInterval(load, 15_000)
+          if (data.ok) {
+            next = 90_000
           } else {
-            clearInterval(id)
-            id = setInterval(load, 90_000)
+            // Server has no data yet — nudge a refresh and retry sooner
+            fetch('/api/usage/refresh').catch(() => {})
+            next = 15_000
           }
         }
       } catch {
-        clearInterval(id)
-        id = setInterval(load, 15_000)
+        next = 15_000
       }
+      schedule(next)
     }
     load()
-    id = setInterval(load, 30_000)
-    return () => clearInterval(id)
+    return () => { mounted = false; clearTimeout(id) }
   }, [])
 
   const s = usage?.session
