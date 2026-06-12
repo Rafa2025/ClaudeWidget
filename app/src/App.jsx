@@ -44,8 +44,10 @@ export default function App() {
           pendingRef.current = { mode, msg, opts }
           return prev
         }
-        // input/ask only valid from thinking — never from idle (spurious notifications)
-        if ((mode === 'input' || mode === 'ask') && prev === 'idle') return prev
+        // input only valid from thinking — never from idle (spurious notifications).
+        // ask is always deliberate (a tool POSTed a question) and must show even
+        // when idle, otherwise the asker waits forever for an answer.
+        if (mode === 'input' && prev === 'idle') return prev
         return mode
       })
       if (mode === 'input') { setNotifMsg(msg || ''); setAskOpts([]) }

@@ -144,10 +144,24 @@ def cmd(script):
     fwd = hooks_dir.replace('\\', '/')
     return 'powershell -NoProfile -NonInteractive -File ' + fwd + '/' + script
 
-settings['hooks']['SessionStart'] = [{'hooks': [{'type': 'command', 'command': cmd('widget-start.ps1')}]}]
-settings['hooks']['PreToolUse']   = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-thinking.ps1')}]}]
-settings['hooks']['Stop']         = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-done.ps1')}]}]
-settings['hooks']['Notification'] = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-notify.ps1')}]}]
+def ensure(event, script, matcher=True):
+    """Append our hook to the event's list unless it's already registered.
+    Never replaces the list - the user's existing hooks must survive."""
+    command = cmd(script)
+    entries = settings['hooks'].setdefault(event, [])
+    for entry in entries:
+        for h in entry.get('hooks', []):
+            if h.get('command') == command:
+                return
+    entry = {'hooks': [{'type': 'command', 'command': command}]}
+    if matcher:
+        entry = {'matcher': '', **entry}
+    entries.append(entry)
+
+ensure('SessionStart', 'widget-start.ps1', matcher=False)
+ensure('PreToolUse',   'widget-thinking.ps1')
+ensure('Stop',         'widget-done.ps1')
+ensure('Notification', 'widget-notify.ps1')
 
 os.makedirs(os.path.dirname(settings_file), exist_ok=True)
 with open(settings_file, 'w', encoding='utf-8') as f:
@@ -184,10 +198,13 @@ Write-Step "Launching widget"
 $portFile = Join-Path $env:TEMP "claude-widget-port.txt"
 $alreadyRunning = $false
 if (Test-Path $portFile) {
-    $port = (Get-Content $portFile -Raw -ErrorAction SilentlyContinue).Trim()
+    $lines = @(Get-Content $portFile -ErrorAction SilentlyContinue)
+    $port  = if ($lines.Count -ge 1) { ([string]$lines[0]).Trim() } else { $null }
+    $token = if ($lines.Count -ge 2) { ([string]$lines[1]).Trim() } else { '' }
     if ($port) {
         try {
             Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/state" -Method POST `
+                -Headers @{ 'X-Widget-Token' = $token } `
                 -Body '{"state":"idle"}' -ContentType 'application/json' -TimeoutSec 1 | Out-Null
             $alreadyRunning = $true
         } catch {}

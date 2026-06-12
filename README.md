@@ -86,7 +86,7 @@ Claude Code  ──hooks──▶  HTTP POST /api/state  ──▶  Electron  �
 (terminal)                 (localhost:random)       (main.js)      (React/Vite)
 ```
 
-1. **Claude Code hooks** (`PreToolUse`, `Stop`, `Notification`) POST a JSON state change to the widget's local HTTP server. The server's random port is published in a well-known port file.
+1. **Claude Code hooks** (`PreToolUse`, `Stop`, `Notification`) POST a JSON state change to the widget's local HTTP server. The server's random port and a per-run auth token are published in a well-known port file (line 1: port, line 2: token; `0600` on Unix).
 2. **Electron** (`main.js`) receives the request and calls `window.setStatus()` in the renderer via `executeJavaScript`.
 3. **The React app** (`App.jsx`) updates the critter animation, status text, and optionally shows an input field or multiple-choice buttons.
 4. **Text replies** typed in the widget are injected back to the terminal via platform-specific keystroke emulation.
@@ -99,6 +99,8 @@ Claude Code  ──hooks──▶  HTTP POST /api/state  ──▶  Electron  �
 | `/api/input` | POST | Inject raw text into the terminal |
 | `/api/usage` | GET | Read cached token-usage stats |
 | `/api/usage/refresh` | GET | Force a usage refresh |
+
+All POST endpoints require the `X-Widget-Token` header matching the token in the port file (it changes every widget restart). This blocks keystroke injection by other local users and by browser pages (the custom header forces a CORS preflight that is never approved). Passive states (`thinking`, `done`, `idle`) update the widget without stealing focus; only `input` and `ask` bring it to the foreground.
 
 ---
 

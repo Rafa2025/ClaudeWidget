@@ -1,9 +1,10 @@
 // Claude Code Widget — Electron main process (Linux)
 const { app, BrowserWindow, ipcMain, Tray, Menu, screen, nativeImage } = require('electron')
-const http = require('http')
-const path = require('path')
-const fs   = require('fs')
-const os   = require('os')
+const http   = require('http')
+const path   = require('path')
+const fs     = require('fs')
+const os     = require('os')
+const crypto = require('crypto')
 const { PNG } = require('pngjs')
 
 const WIN_W = 255, WIN_H = 285, MARGIN = 20
@@ -12,8 +13,11 @@ const DIST_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'dist')
   : path.join(__dirname, '../../app/dist')
 
-// Port file lives in /tmp on Linux
-const PORT_FILE = '/tmp/claude-widget-port.txt'
+// Port file lives in /tmp on Linux. It holds "port\ntoken" and is chmod 600:
+// the token authenticates POSTs so no other local user / browser page can
+// inject keystrokes via this server.
+const PORT_FILE  = '/tmp/claude-widget-port.txt'
+const AUTH_TOKEN = crypto.randomBytes(32).toString('hex')
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let win          = null
@@ -29,6 +33,9 @@ app.commandLine.appendSwitch('enable-transparent-visuals')
 
 // ── App ready ─────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  // Standalone builds self-register their Claude Code hooks (no installer was run)
+  if (app.isPackaged) require('./setup').runFirstRunSetup()
+
   trayFrames = renderTrayFrames()
   httpPort   = await startServer()
   writePortFile(httpPort)
@@ -69,7 +76,7 @@ function createWindow() {
 function applyState(mode, msg = '', opts = []) {
   if (!win || win.isDestroyed()) return
   const safeMode = mode.replace(/['"\\]/g, '').slice(0, 20)
-  const safeMsg  = JSON.stringify((msg  || '').slice(0, 200))
+  const safeMsg  = JSON.stringify((msg  || '').slice(0, 4000))
   const safeOpts = JSON.stringify(Array.isArray(opts) ? opts : [])
   win.webContents.executeJavaScript(
     `window.setStatus && window.setStatus('${safeMode}', ${safeMsg}, ${safeOpts})`
@@ -122,6 +129,13 @@ function readBody(req, cb) {
 function handleRequest(req, res) {
   const url = req.url.split('?')[0]
 
+  // POSTs drive state and keystroke injection — require the shared token.
+  // (A custom header also forces a CORS preflight, which is never approved,
+  // so browser pages can't reach these endpoints at all.)
+  if (req.method === 'POST' && req.headers['x-widget-token'] !== AUTH_TOKEN) {
+    res.writeHead(403); return res.end()
+  }
+
   if (req.method === 'GET' && url === '/api/usage') {
     const body = Buffer.from(JSON.stringify(usageCache))
     res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': body.length })
@@ -150,8 +164,14 @@ function handleRequest(req, res) {
         const msg  = parsed.msg   || ''
         const opts = parsed.options || []
         if (['idle','thinking','input','done','ask'].includes(mode) && win) {
-          if (!win.isVisible()) win.show()
-          win.focus()
+          // Only take focus when the user is actually needed; passive states
+          // (thinking fires on every tool use) must not steal the keyboard
+          if (mode === 'input' || mode === 'ask') {
+            win.show()
+            win.focus()
+          } else if (!win.isVisible()) {
+            win.showInactive()
+          }
           applyState(mode, msg, opts)
         } else if (mode === 'quit') {
           app.quit()
@@ -187,7 +207,10 @@ function handleRequest(req, res) {
 
 // ── Port file ─────────────────────────────────────────────────────────────────
 function writePortFile(port) {
-  try { fs.writeFileSync(PORT_FILE, String(port), 'utf8') } catch {}
+  try {
+    fs.rmSync(PORT_FILE, { force: true })  // ensure mode applies to a fresh file
+    fs.writeFileSync(PORT_FILE, `${port}\n${AUTH_TOKEN}\n`, { encoding: 'utf8', mode: 0o600 })
+  } catch {}
 }
 
 function cleanup() {

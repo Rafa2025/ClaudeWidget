@@ -104,12 +104,20 @@ except Exception:
 if 'hooks' not in settings:
     settings['hooks'] = {}
 
-def cmd(script):
-    return f'{hooks_dir}/{script}'
+def ensure(event, script):
+    """Append our hook to the event's list unless it's already registered.
+    Never replaces the list — the user's existing hooks must survive."""
+    command = f'{hooks_dir}/{script}'
+    entries = settings['hooks'].setdefault(event, [])
+    for entry in entries:
+        for h in entry.get('hooks', []):
+            if h.get('command') == command:
+                return
+    entries.append({'matcher': '', 'hooks': [{'type': 'command', 'command': command}]})
 
-settings['hooks']['PreToolUse']   = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-thinking')}]}]
-settings['hooks']['Stop']         = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-done')}]}]
-settings['hooks']['Notification'] = [{'matcher': '', 'hooks': [{'type': 'command', 'command': cmd('widget-notify')}]}]
+ensure('PreToolUse',   'widget-thinking')
+ensure('Stop',         'widget-done')
+ensure('Notification', 'widget-notify')
 
 os.makedirs(os.path.dirname(settings_file), exist_ok=True)
 with open(settings_file, 'w', encoding='utf-8') as f:

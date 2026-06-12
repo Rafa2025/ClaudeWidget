@@ -45,12 +45,15 @@ public class WinUtil2 {
 $f = "$env:TEMP\claude-widget-port.txt"
 
 if (Test-Path $f) {
-    $port = (Get-Content $f -Raw -ErrorAction SilentlyContinue).Trim()
+    $lines = @(Get-Content $f -ErrorAction SilentlyContinue)
+    $port  = if ($lines.Count -ge 1) { ([string]$lines[0]).Trim() } else { $null }
+    $token = if ($lines.Count -ge 2) { ([string]$lines[1]).Trim() } else { '' }
     if ($port) {
         try {
             Invoke-RestMethod `
                 -Uri "http://127.0.0.1:$port/api/state" `
                 -Method POST `
+                -Headers @{ 'X-Widget-Token' = $token } `
                 -Body '{"state":"idle"}' `
                 -ContentType 'application/json' `
                 -TimeoutSec 1 | Out-Null

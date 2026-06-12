@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Claude Code Widget hook — fires on PreToolUse, sets widget to "thinking"
-PORT=$(cat /tmp/claude-widget-port.txt 2>/dev/null)
+PORT_FILE=/tmp/claude-widget-port.txt
+PORT=$(sed -n 1p "$PORT_FILE" 2>/dev/null)
+TOKEN=$(sed -n 2p "$PORT_FILE" 2>/dev/null)
 [ -z "$PORT" ] && exit 0
 curl -sf --max-time 1 -X POST "http://127.0.0.1:$PORT/api/state" \
      -H 'Content-Type: application/json' \
+     -H "X-Widget-Token: $TOKEN" \
      -d '{"state":"thinking"}' >/dev/null 2>&1 &
