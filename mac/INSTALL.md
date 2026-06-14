@@ -27,13 +27,21 @@ bash install.sh
 
 The script is fully hands-off. It will:
 1. Install Node.js / Python via Homebrew if missing (installing Homebrew itself if needed)
-2. Install the `cryptography` Python package
-3. Build the React frontend (`app/dist/`)
-4. Install Electron npm packages
-5. Copy hook scripts to `~/.claude/hooks/` and register them in `~/.claude/settings.json`
-6. Add terminal-focus capture to your shell RC (`~/.zshrc` / `~/.bashrc`)
-7. Trigger the Keychain dialog for usage stats (click **Always Allow**)
-8. Install a LaunchAgent and **start the widget immediately** (also starts at every login)
+2. **Remove the old tkinter widget** if present (see note below)
+3. Install the `cryptography` Python package
+4. Build the React frontend (`app/dist/`)
+5. Install Electron npm packages
+6. Copy hook scripts to `~/.claude/hooks/` and register them in `~/.claude/settings.json`
+7. Add terminal-focus capture to your shell RC (`~/.zshrc` / `~/.bashrc`)
+8. Trigger the Keychain dialog for usage stats (click **Always Allow**)
+9. Install a LaunchAgent and **start the widget immediately** (also starts at every login)
+
+> **Upgrading from the old version?** Earlier macOS builds were a Python/tkinter
+> tray daemon that crashes on Apple Silicon + recent macOS (`Tcl_Panic` in
+> `TkpInit` → abort, the moment a Claude session starts). The installer now runs
+> `uninstall-old.sh` automatically to delete those leftover hooks before setting
+> up the new Electron widget, so the upgrade is hands-off. You can also run it on
+> its own at any time: `bash mac/uninstall-old.sh`.
 
 When the widget first starts it asks for **Accessibility** permission — click
 "Open System Settings" and enable the toggle. That's the only manual step.
@@ -237,6 +245,7 @@ usage stats work on current Chrome versions.
 | Wrong terminal focused | Run `session-start.sh` in your Claude Code terminal before starting a session |
 | Usage stats always 0% | Ensure Chrome is signed in to claude.ai; re-check the Keychain prompt (run `python3 mac/electron/get-auth.py` to test) |
 | Widget hidden behind full-screen apps | Should not happen (`screen-saver` level is set); report your macOS version if it does |
+| Python crash (`Tcl_Panic` / `TkpInit` / `abort`) when a session starts | Leftover **old tkinter widget**. Run `bash mac/uninstall-old.sh`, then restart Claude Code. (The installer now does this automatically.) |
 
 ---
 
@@ -247,3 +256,6 @@ cd path/to/ClaudeWidget
 git pull
 bash mac/install.sh
 ```
+
+The installer automatically removes any old tkinter-based widget as part of the
+upgrade, so there's nothing extra to do.

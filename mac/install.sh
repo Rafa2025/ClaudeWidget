@@ -57,6 +57,14 @@ ok "python3 $(python3 --version)"
 command -v osascript &>/dev/null || err "osascript not found — this doesn't look like macOS."
 ok "osascript found"
 
+# ── 1b. Remove the old tkinter widget (prevents the TkpInit crash) ────────────
+# Earlier versions of the macOS widget were a Python/tkinter tray daemon that
+# crashes on Apple Silicon + recent macOS (Tcl_Panic in TkpInit). Its leftover
+# hooks would otherwise fire on every session and crash. Clean them out before
+# installing the new Electron widget. Fully automatic and idempotent.
+step "Removing any old tkinter widget"
+bash "$MAC_DIR/uninstall-old.sh" || warn "old-widget cleanup reported a problem (continuing)"
+
 # ── 2. Python dependencies ─────────────────────────────────────────────────────
 step "Installing Python dependencies (cryptography)"
 python3 -m pip install cryptography --quiet --break-system-packages 2>/dev/null \
