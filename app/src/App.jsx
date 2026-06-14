@@ -198,7 +198,13 @@ export default function App() {
   const submitInput = useCallback(() => {
     const txt = inputText.trim()
     if (!txt) return
-    fetch('/api/input', { method: 'POST', body: txt }).catch(() => {})
+    // The server rejects tokenless POSTs (so other local apps/pages can't inject
+    // keystrokes). The token is injected into this page's HTML by the host.
+    fetch('/api/input', {
+      method: 'POST',
+      headers: { 'X-Widget-Token': window.WIDGET_TOKEN || '' },
+      body: txt,
+    }).catch(() => {})
     setInputText('')
     setShowInput(false)
     setMode('thinking')

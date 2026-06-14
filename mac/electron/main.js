@@ -196,11 +196,11 @@ function handleRequest(req, res) {
     if (!fullPath.startsWith(DIST_DIR)) { res.writeHead(403); return res.end() }
 
     fs.stat(fullPath, (err) => {
-      if (err) {
-        const idx = path.join(DIST_DIR, 'index.html')
-        res.writeHead(200, { 'Content-Type': 'text/html' })
-        fs.createReadStream(idx).pipe(res)
-        return
+      // Serve index.html (root or SPA fallback) with the auth token injected so
+      // the widget's own page can POST to /api/input. Same-origin only — an
+      // external page can't read this HTML cross-origin, so the token stays secret.
+      if (err || filePath === '/index.html') {
+        return serveIndex(res)
       }
       const ext  = path.extname(fullPath)
       const mime = MIME[ext] || 'application/octet-stream'
@@ -211,6 +211,20 @@ function handleRequest(req, res) {
   }
 
   res.writeHead(405); res.end()
+}
+
+// Serve index.html with the auth token injected as window.WIDGET_TOKEN, so the
+// widget's own page can authenticate its POST to /api/input.
+function serveIndex(res) {
+  const idx = path.join(DIST_DIR, 'index.html')
+  fs.readFile(idx, 'utf8', (err, html) => {
+    if (err) { res.writeHead(404); return res.end() }
+    const tag = `<script>window.WIDGET_TOKEN=${JSON.stringify(AUTH_TOKEN)}</script>`
+    html = html.includes('</head>') ? html.replace('</head>', `${tag}</head>`) : tag + html
+    const body = Buffer.from(html)
+    res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-cache', 'Content-Length': body.length })
+    res.end(body)
+  })
 }
 
 // ── Port file ─────────────────────────────────────────────────────────────────
