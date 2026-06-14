@@ -168,7 +168,14 @@ else
 fi
 
 # ── 8. Start the widget ────────────────────────────────────────────────────────
-NPM_BIN="$(command -v npm)"
+# Launch the Electron binary directly rather than via `npm start`. Under launchd
+# the npm wrapper exits immediately (it doesn't hold the Electron child), so the
+# LaunchAgent would show as not-running and no window appears. The native binary
+# stays in the foreground, so launchd tracks it and KeepAlive can relaunch it.
+ELECTRON_BIN="$ELECTRON_DIR/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
+[ -x "$ELECTRON_BIN" ] || ELECTRON_BIN="$ELECTRON_DIR/node_modules/.bin/electron"
+[ -e "$ELECTRON_BIN" ] || err "Electron binary not found — did 'npm install' in $ELECTRON_DIR succeed?"
+
 if [ "$AUTOSTART" -eq 1 ]; then
     step "Installing LaunchAgent (starts now and at every login)"
     AGENTS_DIR="$HOME/Library/LaunchAgents"
@@ -183,17 +190,23 @@ if [ "$AUTOSTART" -eq 1 ]; then
     <string>ai.anthropic.claude-code-widget</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$NPM_BIN</string>
-        <string>start</string>
-        <string>--prefix</string>
+        <string>$ELECTRON_BIN</string>
         <string>$ELECTRON_DIR</string>
     </array>
+    <key>WorkingDirectory</key>
+    <string>$ELECTRON_DIR</string>
     <key>RunAtLoad</key>
     <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/claude-widget.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/claude-widget.err.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>$(dirname "$NPM_BIN"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 </dict>
 </plist>
@@ -201,12 +214,13 @@ PLISTEOF
     launchctl unload "$PLIST" 2>/dev/null || true
     launchctl load "$PLIST"
     ok "Widget started (LaunchAgent: $PLIST)"
+    echo "   Logs: /tmp/claude-widget.out.log  and  /tmp/claude-widget.err.log"
     echo "   To remove autostart later: launchctl unload \"$PLIST\" && rm \"$PLIST\""
 else
     step "Starting the widget (autostart skipped)"
-    nohup "$NPM_BIN" start --prefix "$ELECTRON_DIR" >/dev/null 2>&1 &
+    nohup "$ELECTRON_BIN" "$ELECTRON_DIR" >/tmp/claude-widget.out.log 2>/tmp/claude-widget.err.log &
     disown
-    ok "Widget started in the background"
+    ok "Widget started in the background (logs in /tmp/claude-widget.*.log)"
 fi
 
 # ── Done ───────────────────────────────────────────────────────────────────────

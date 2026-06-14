@@ -185,6 +185,7 @@ rm ~/Library/LaunchAgents/ai.anthropic.claude-code-widget.plist
 To set it up manually:
 
 ```bash
+ELECTRON_DIR=/path/to/ClaudeWidget/mac/electron
 cat > ~/Library/LaunchAgents/ai.anthropic.claude-code-widget.plist <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -194,20 +195,29 @@ cat > ~/Library/LaunchAgents/ai.anthropic.claude-code-widget.plist <<EOF
     <string>ai.anthropic.claude-code-widget</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/npm</string>
-        <string>start</string>
-        <string>--prefix</string>
-        <string>/path/to/ClaudeWidget/mac/electron</string>
+        <string>$ELECTRON_DIR/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron</string>
+        <string>$ELECTRON_DIR</string>
     </array>
+    <key>WorkingDirectory</key>
+    <string>$ELECTRON_DIR</string>
     <key>RunAtLoad</key>
     <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/claude-widget.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/claude-widget.err.log</string>
 </dict>
 </plist>
 EOF
 launchctl load ~/Library/LaunchAgents/ai.anthropic.claude-code-widget.plist
 ```
 
-(On Apple Silicon with Homebrew, npm is at `/opt/homebrew/bin/npm`.)
+> **Important:** launch the Electron binary directly (as above), **not**
+> `npm start`. Under `launchd` the `npm` wrapper exits immediately without
+> holding the Electron process, so the widget never stays open. `KeepAlive`
+> relaunches it if it ever exits.
 
 ---
 
@@ -239,7 +249,8 @@ usage stats work on current Chrome versions.
 
 | Problem | Fix |
 |---------|-----|
-| Widget doesn't appear | Check `npm start` output; ensure `app/dist/` exists (`npm run build` in `app/`) |
+| Widget doesn't appear | Check `/tmp/claude-widget.err.log`. Confirm it's running: `launchctl list \| grep claude` (a `-` in the first column means it exited). Test in the foreground: `cd mac/electron && npm start`. Ensure `app/dist/index.html` exists (`npm run build` in `app/`). |
+| Widget runs with `npm start` but not at login | The LaunchAgent must launch the Electron binary directly, not `npm start`. Re-run `bash mac/install.sh` (the installer now generates the correct plist with `KeepAlive`). |
 | Hook not triggering | Check `~/.claude/settings.json`; restart Claude Code; run `chmod +x ~/.claude/hooks/widget-*` |
 | Typed replies never reach the terminal | Grant Accessibility permission (System Settings → Privacy & Security → Accessibility) to Electron / your terminal |
 | Wrong terminal focused | Run `session-start.sh` in your Claude Code terminal before starting a session |
