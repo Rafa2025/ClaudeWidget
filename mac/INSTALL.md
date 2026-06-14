@@ -9,7 +9,7 @@ None to install manually — the installer takes care of everything. For referen
 | Tool | Purpose | If missing |
 |------|---------|------------|
 | Node.js 18+ | Run Electron | Auto-installed via Homebrew |
-| Python 3.10+ | Cookie auth & hooks | Auto-installed via Homebrew |
+| Python 3.9+ | Cookie auth & hooks | Built into macOS (Command Line Tools) |
 | Homebrew | Package manager | Auto-installed (asks for your password) |
 | osascript, curl | Key injection, hooks | Built into macOS |
 
@@ -203,7 +203,10 @@ cat > ~/Library/LaunchAgents/ai.anthropic.claude-code-widget.plist <<EOF
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
     <key>StandardOutPath</key>
     <string>/tmp/claude-widget.out.log</string>
     <key>StandardErrorPath</key>
@@ -217,7 +220,8 @@ launchctl load ~/Library/LaunchAgents/ai.anthropic.claude-code-widget.plist
 > **Important:** launch the Electron binary directly (as above), **not**
 > `npm start`. Under `launchd` the `npm` wrapper exits immediately without
 > holding the Electron process, so the widget never stays open. `KeepAlive`
-> relaunches it if it ever exits.
+> with `SuccessfulExit=false` relaunches it only after a *crash* — clicking the
+> widget's quit button exits cleanly and stays quit.
 
 ---
 

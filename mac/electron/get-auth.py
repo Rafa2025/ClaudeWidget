@@ -5,6 +5,9 @@ Prints JSON: {"sk": "...", "org": "..."}. Exits with empty values on failure.
 The first run triggers a Keychain dialog for "Chrome Safe Storage" —
 click "Always Allow" and subsequent runs are silent.
 """
+# macOS ships Python 3.9 (Command Line Tools); `X | None` annotations are 3.10+.
+# Defer annotation evaluation so this runs on 3.9 too.
+from __future__ import annotations
 import sys, json, os, shutil, tempfile, sqlite3, re, subprocess
 
 COOKIE_DB = os.path.join(

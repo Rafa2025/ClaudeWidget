@@ -198,7 +198,10 @@ if [ "$AUTOSTART" -eq 1 ]; then
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
     <key>StandardOutPath</key>
     <string>/tmp/claude-widget.out.log</string>
     <key>StandardErrorPath</key>
